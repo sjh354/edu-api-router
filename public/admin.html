@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relay Admin — 요청 로그</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f2f5;
+      color: #222;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 8px;
+      color: #1a1a2e;
+    }
+
+    .subtitle {
+      font-size: .88rem;
+      color: #888;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      padding: 24px;
+      max-width: 1100px;
+      margin: 0 auto 20px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .card-header h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    #log-count {
+      font-size: .82rem;
+      color: #888;
+    }
+
+    #status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+      margin-right: 6px;
+      transition: background .3s;
+    }
+    #status-dot.connected { background: #27ae60; }
+
+    /* 테이블 */
+    #log-table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 2px solid #e8e8e8;
+      color: #666;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tbody tr.log-row {
+      border-bottom: 1px solid #f0f0f0;
+      transition: background .1s;
+    }
+
+    tbody tr.log-row:hover { background: #fafafa; }
+
+    tbody td {
+      padding: 8px 10px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    td.path-cell {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: monospace;
+      font-size: .83rem;
+    }
+
+    /* 상태 배지 */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: .8rem;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    .badge.ok   { background: #e6f9ef; color: #1a7a42; }
+    .badge.warn { background: #fff7e0; color: #a06000; }
+    .badge.err  { background: #fdecea; color: #c0392b; }
+
+    /* outcome 배지 */
+    .outcome {
+      font-size: .75rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f0f0f0;
+      color: #555;
+    }
+    .outcome.timeout  { background: #fff3cd; color: #856404; }
+    .outcome.error    { background: #fdecea; color: #c0392b; }
+    .outcome.agent-disconnect { background: #ede7f6; color: #512da8; }
+
+    /* method */
+    .method { font-family: monospace; font-weight: 700; font-size: .83rem; }
+    .method.get    { color: #0069c0; }
+    .method.post   { color: #27ae60; }
+    .method.put    { color: #e67e22; }
+    .method.patch  { color: #8e44ad; }
+    .method.delete { color: #c0392b; }
+
+    /* 열기 버튼 */
+    .btn-open {
+      padding: 3px 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      font-size: .8rem;
+      cursor: pointer;
+      color: #555;
+    }
+    .btn-open:hover { background: #f0f0f0; }
+
+    /* 상세 행 */
+    tr.detail-row td {
+      padding: 0;
+      background: #f8f9fb;
+    }
+
+    .detail-inner {
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      border-top: 1px solid #e8e8e8;
+    }
+
+    @media (max-width: 700px) {
+      .detail-inner { grid-template-columns: 1fr; }
+    }
+
+    .detail-section h4 {
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: #888;
+      margin-bottom: 6px;
+    }
+
+    .detail-section pre {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: .8rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+      color: #333;
+    }
+
+    .empty-msg {
+      text-align: center;
+      padding: 40px;
+      color: #bbb;
+      font-size: .9rem;
+    }
+  </style>
+</head>
+<body>
+  <div style="max-width:1100px;margin:0 auto;">
+    <h1>🖥️ Relay Admin</h1>
+    <p class="subtitle">
+      <span id="status-dot"></span>
+      <span id="status-text">서버 연결 중...</span>
+    </p>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>요청 로그</h2>
+        <span id="log-count">0 / 100</span>
+      </div>
+      <div id="log-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>시간</th>
+              <th>학생</th>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Status</th>
+              <th>결과</th>
+              <th>응답시간</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="log-tbody">
+            <tr id="empty-row">
+              <td colspan="8" class="empty-msg">요청을 기다리는 중...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const tbody       = document.getElementById('log-tbody');
+    const logCountEl  = document.getElementById('log-count');
+    const statusDot   = document.getElementById('status-dot');
+    const statusText  = document.getElementById('status-text');
+    const emptyRow    = document.getElementById('empty-row');
+
+    const MAX_ROWS = 100;
+
+    // ── 소켓 연결 ────────────────────────────────────────────
+    const socket = io();
+
+    socket.on('connect', () => {
+      statusDot.classList.add('connected');
+      statusText.textContent = '서버 연결됨';
+      socket.emit('join-admin');
+    });
+
+    socket.on('disconnect', () => {
+      statusDot.classList.remove('connected');
+      statusText.textContent = '서버 연결 끊김 — 재연결 중...';
+    });
+
+    socket.on('log-history', (entries) => {
+      // 재연결 시 중복 삽입 방지: 기존 행 전체 제거 후 재렌더
+      tbody.querySelectorAll('tr.log-row, tr.detail-row').forEach(r => r.remove());
+      // 히스토리는 시간순으로 쌓여 있으므로 최신이 위에 오도록 역순으로 추가
+      const reversed = [...entries].reverse();
+      for (const entry of reversed) {
+        addRow(entry, false);
+      }
+    });
+
+    socket.on('log-entry', (entry) => {
+      addRow(entry, true);
+    });
+
+    // ── 로그 행 추가 ─────────────────────────────────────────
+    function addRow(entry, prepend) {
+      if (emptyRow.parentNode) emptyRow.remove();
+
+      const tr = document.createElement('tr');
+      tr.className = 'log-row';
+      tr.dataset.id = entry.id;
+
+      const timeStr = new Date(entry.timestamp).toLocaleTimeString('ko-KR');
+      const statusClass = entry.status < 300 ? 'ok' : entry.status < 500 ? 'warn' : 'err';
+      const methodClass = entry.method.toLowerCase();
+      const outcomeLabel = {
+        success: '성공',
+        timeout: '타임아웃',
+        error: '오류',
+        'agent-disconnect': '연결해제',
+      }[entry.outcome] || entry.outcome;
+      const elapsedStr = entry.elapsed > 0 ? `${entry.elapsed}ms` : '—';
+
+      tr.innerHTML = `
+        <td>${timeStr}</td>
+        <td>${escHtml(entry.userId)}</td>
+        <td><span class="method ${methodClass}">${escHtml(entry.method)}</span></td>
+        <td class="path-cell" title="${escHtml(entry.path)}">${escHtml(entry.path)}</td>
+        <td><span class="badge ${statusClass}">${entry.status}</span></td>
+        <td><span class="outcome ${entry.outcome}">${outcomeLabel}</span></td>
+        <td>${elapsedStr}</td>
+        <td><button class="btn-open" onclick="toggleDetail('${entry.id}')">열기</button></td>
+      `;
+
+      // 상세 행 (기본 숨김)
+      const detailTr = document.createElement('tr');
+      detailTr.className = 'detail-row';
+      detailTr.id = 'detail-' + entry.id;
+      detailTr.style.display = 'none';
+      detailTr.innerHTML = `<td colspan="8"><div class="detail-inner">
+        <div class="detail-section">
+          <h4>요청 헤더</h4>
+          <pre>${escHtml(formatJson(entry.reqHeaders))}</pre>
+        </div>
+        <div class="detail-section">
+          <h4>요청 Body</h4>
+          <pre>${escHtml(entry.reqBody ?? '(없음)')}</pre>
+        </div>
+        <div class="detail-section">
+          <h4>응답 헤더</h4>
+          <pre>${escHtml(formatJson(entry.resHeaders))}</pre>
+        </div>
+        <div class="detail-section">
+          <h4>응답 Body</h4>
+          <pre>${escHtml(entry.resBody || '(없음)')}</pre>
+        </div>
+      </div></td>`;
+
+      if (prepend) {
+        tbody.prepend(detailTr);
+        tbody.prepend(tr);
+      } else {
+        tbody.appendChild(tr);
+        tbody.appendChild(detailTr);
+      }
+
+      trimRows();
+      updateCount();
+    }
+
+    function toggleDetail(id) {
+      const row = document.getElementById('detail-' + id);
+      if (!row) return;
+      const btn = tbody.querySelector(`tr[data-id="${id}"] .btn-open`);
+      if (row.style.display === 'none') {
+        row.style.display = '';
+        if (btn) btn.textContent = '닫기';
+      } else {
+        row.style.display = 'none';
+        if (btn) btn.textContent = '열기';
+      }
+    }
+
+    function trimRows() {
+      const rows = tbody.querySelectorAll('tr.log-row');
+      let i = rows.length;
+      while (i-- > MAX_ROWS) {
+        const oldest = rows[i];
+        document.getElementById('detail-' + oldest.dataset.id)?.remove();
+        oldest.remove();
+      }
+    }
+
+    function updateCount() {
+      const current = tbody.querySelectorAll('tr.log-row').length;
+      logCountEl.textContent = `${current} / ${MAX_ROWS}`;
+    }
+
+    // ── 유틸 ─────────────────────────────────────────────────
+    function escHtml(str) {
+      if (typeof str !== 'string') return String(str);
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function formatJson(obj) {
+      if (!obj || Object.keys(obj).length === 0) return '(없음)';
+      try { return JSON.stringify(obj, null, 2); }
+      catch { return String(obj); }
+    }
+  </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ALLOWED_IDS } from './userIds';
 import { pendingStore } from './pendingStore';
 import { getConnectedSocket } from './wsHandler';
+import { logStore } from './logStore';
 
 const TIMEOUT_MS = 30_000;
 const SKIP_REQUEST_HEADERS = new Set(['host', 'connection', 'upgrade']);
@@ -16,6 +17,21 @@ function relayHandler(req: Request, res: Response): void {
     const userId = req.params['userId'] as string;
 
     if (!ALLOWED_IDS.includes(userId)) {
+      logStore.push({
+        id: uuidv4(),
+        timestamp: Date.now(),
+        userId,
+        requestId: '------',
+        method: req.method,
+        path: req.url,
+        status: 404,
+        elapsed: 0,
+        outcome: 'error',
+        reqHeaders: {},
+        reqBody: null,
+        resHeaders: {},
+        resBody: 'Not Found',
+      });
       res.status(404).send('Not Found');
       return;
     }
@@ -23,6 +39,21 @@ function relayHandler(req: Request, res: Response): void {
     const socket = getConnectedSocket(userId);
     if (!socket) {
       log('502', `${userId} - 에이전트 미연결`);
+      logStore.push({
+        id: uuidv4(),
+        timestamp: Date.now(),
+        userId,
+        requestId: '------',
+        method: req.method,
+        path: req.url,
+        status: 502,
+        elapsed: 0,
+        outcome: 'error',
+        reqHeaders: {},
+        reqBody: null,
+        resHeaders: {},
+        resBody: 'Bad Gateway: agent not connected',
+      });
       res.status(502).send('Bad Gateway: agent not connected');
       return;
     }
@@ -53,10 +84,34 @@ function relayHandler(req: Request, res: Response): void {
       pendingStore.delete(requestId);
       const elapsed = Date.now() - startTime;
       log('TIMEOUT', `req-${requestId.slice(0, 6)} → 504 (${elapsed}ms)`);
+      logStore.push({
+        id: uuidv4(),
+        timestamp: startTime,
+        userId,
+        requestId: requestId.slice(0, 6),
+        method: req.method,
+        path: forwardPath,
+        status: 504,
+        elapsed,
+        outcome: 'timeout',
+        reqHeaders: headers,
+        reqBody: body,
+        resHeaders: {},
+        resBody: '',
+      });
       res.status(504).send('Gateway Timeout');
     }, TIMEOUT_MS);
 
-    pendingStore.set(requestId, { res, timer, startTime, userId });
+    pendingStore.set(requestId, {
+      res,
+      timer,
+      startTime,
+      userId,
+      method: req.method,
+      path: forwardPath,
+      reqHeaders: headers,
+      reqBody: body,
+    });
 
     socket.emit('request', {
       requestId,

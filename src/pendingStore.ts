@@ -1,10 +1,16 @@
 import { Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import { logStore } from './logStore';
 
 export interface PendingEntry {
   res: Response;
   timer: NodeJS.Timeout;
   startTime: number;
   userId: string;
+  method: string;
+  path: string;
+  reqHeaders: Record<string, string>;
+  reqBody: string | null;
 }
 
 const byRequestId = new Map<string, PendingEntry>();
@@ -41,6 +47,21 @@ export const pendingStore = {
       if (entry) {
         clearTimeout(entry.timer);
         entry.res.status(502).send('Agent disconnected');
+        logStore.push({
+          id: uuidv4(),
+          timestamp: entry.startTime,
+          userId,
+          requestId: requestId.slice(0, 6),
+          method: entry.method,
+          path: entry.path,
+          status: 502,
+          elapsed: Date.now() - entry.startTime,
+          outcome: 'agent-disconnect',
+          reqHeaders: entry.reqHeaders,
+          reqBody: entry.reqBody,
+          resHeaders: {},
+          resBody: 'Agent disconnected',
+        });
         byRequestId.delete(requestId);
       }
     }

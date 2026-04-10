@@ -1,6 +1,8 @@
 import { Server, Socket } from 'socket.io';
+import { v4 as uuidv4 } from 'uuid';
 import { ALLOWED_IDS } from './userIds';
 import { pendingStore } from './pendingStore';
+import { logStore } from './logStore';
 
 const connectedSockets = new Map<string, Socket>();
 
@@ -14,8 +16,15 @@ function log(level: string, message: string): void {
 }
 
 export function setupWsHandler(io: Server): void {
+  logStore.setEmitFn((entry) => io.to('admin').emit('log-entry', entry));
+
   io.on('connection', (socket: Socket) => {
     let registeredUserId: string | null = null;
+
+    socket.on('join-admin', () => {
+      void socket.join('admin');
+      socket.emit('log-history', logStore.getAll());
+    });
 
     socket.on('register', ({ userId }: { userId: string }) => {
       if (!ALLOWED_IDS.includes(userId)) {
@@ -69,6 +78,22 @@ export function setupWsHandler(io: Server): void {
           filteredHeaders[key] = val;
         }
       }
+
+      logStore.push({
+        id: uuidv4(),
+        timestamp: pending.startTime,
+        userId: pending.userId,
+        requestId: requestId.slice(0, 6),
+        method: pending.method,
+        path: pending.path,
+        status,
+        elapsed,
+        outcome: 'success',
+        reqHeaders: pending.reqHeaders,
+        reqBody: pending.reqBody,
+        resHeaders: filteredHeaders,
+        resBody: body,
+      });
 
       pending.res.set(filteredHeaders);
       pending.res.status(status).send(body);
