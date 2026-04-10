@@ -201,6 +201,30 @@
       color: #bbb;
       font-size: .9rem;
     }
+
+    /* 학생 연결 현황 */
+    #student-list {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    #student-list li {
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: .9rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #student-list li.connected    { background: #edfaf3; }
+    #student-list li.disconnected { background: #f7f7f7; color: #888; }
+
+    .dot { font-size: 1rem; }
+    .dot.green { color: #27ae60; }
+    .dot.gray  { color: #bbb; }
   </style>
 </head>
 <body>
@@ -210,6 +234,14 @@
       <span id="status-dot"></span>
       <span id="status-text">서버 연결 중...</span>
     </p>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>학생 연결 현황</h2>
+        <span id="student-count" style="font-size:.82rem;color:#888;">—</span>
+      </div>
+      <ul id="student-list"></ul>
+    </div>
 
     <div class="card">
       <div class="card-header">
@@ -247,6 +279,8 @@
     const statusDot   = document.getElementById('status-dot');
     const statusText  = document.getElementById('status-text');
     const emptyRow    = document.getElementById('empty-row');
+    const studentList = document.getElementById('student-list');
+    const studentCountEl = document.getElementById('student-count');
 
     const MAX_ROWS = 100;
 
@@ -257,6 +291,12 @@
       statusDot.classList.add('connected');
       statusText.textContent = '서버 연결됨';
       socket.emit('join-admin');
+      loadStudents();
+    });
+
+    socket.on('status-update', ({ userId, connected }) => {
+      updateStudentItem(userId, connected);
+      updateStudentCount();
     });
 
     socket.on('disconnect', () => {
@@ -277,6 +317,38 @@
     socket.on('log-entry', (entry) => {
       addRow(entry, true);
     });
+
+    // ── 학생 연결 현황 ───────────────────────────────────────
+    async function loadStudents() {
+      const res  = await fetch('/api/users');
+      const data = await res.json();
+      studentList.innerHTML = '';
+      for (const u of data.users) {
+        const li = document.createElement('li');
+        li.dataset.userid = u.id;
+        studentList.appendChild(li);
+        updateStudentItem(u.id, u.connected);
+      }
+      updateStudentCount();
+    }
+
+    function updateStudentItem(userId, connected) {
+      let li = studentList.querySelector(`[data-userid="${escHtml(userId)}"]`);
+      if (!li) {
+        li = document.createElement('li');
+        li.dataset.userid = userId;
+        studentList.appendChild(li);
+      }
+      li.className = connected ? 'connected' : 'disconnected';
+      li.innerHTML = connected
+        ? `<span class="dot green">●</span> <strong>${escHtml(userId)}</strong>`
+        : `<span class="dot gray">○</span> ${escHtml(userId)} <em>(미연결)</em>`;
+    }
+
+    function updateStudentCount() {
+      const count = studentList.querySelectorAll('li.connected').length;
+      studentCountEl.textContent = `${count}명 연결됨`;
+    }
 
     // ── 로그 행 추가 ─────────────────────────────────────────
     function addRow(entry, prepend) {

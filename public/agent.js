@@ -5,14 +5,28 @@
 const MAX_RETRY = 3;
 
 // ── 상태 ──────────────────────────────────────────────────
-let socket = null;
+let socket       = null;
 let registeredAs = null; // 현재 등록된 userId
+let testerTarget = null; // API 테스터에서 선택된 userId
 
 // ── DOM 참조 ──────────────────────────────────────────────
-const userSelect  = document.getElementById('user-select');
-const connectBtn  = document.getElementById('connect-btn');
-const errorMsg    = document.getElementById('error-msg');
-const userList    = document.getElementById('user-list');
+const userSelect   = document.getElementById('user-select');
+const connectBtn   = document.getElementById('connect-btn');
+const connectCard  = document.getElementById('connect-card');
+const errorMsg     = document.getElementById('error-msg');
+const userList     = document.getElementById('user-list');
+const rightPanel   = document.getElementById('right-panel');
+
+const testerTargetName  = document.getElementById('tester-target-name');
+const testerMethod      = document.getElementById('tester-method');
+const testerPath        = document.getElementById('tester-path');
+const headerRows        = document.getElementById('header-rows');
+const bodySection       = document.getElementById('body-section');
+const testerBody        = document.getElementById('tester-body');
+const testerSend        = document.getElementById('tester-send');
+const testerResponse    = document.getElementById('tester-response');
+const testerStatusBadge = document.getElementById('tester-status-badge');
+const testerResponseBody = document.getElementById('tester-response-body');
 
 // ── 유틸 ─────────────────────────────────────────────────
 function showError(msg) {
@@ -32,15 +46,34 @@ async function loadUsers() {
   renderUsers(data.users);
 }
 
+function renderUserLi(li, userId, connected) {
+  li.className = connected ? 'connected' : 'disconnected';
+  if (connected) {
+    li.innerHTML = `
+      <span class="dot green">●</span>
+      <strong>${userId}</strong>
+      <a href="${serverBase()}/${encodeURIComponent(userId)}/" target="_blank">${serverBase()}/${userId}/</a>
+      <button class="btn-test" data-userid="${userId}">테스트</button>`;
+  } else {
+    li.innerHTML = `
+      <span class="dot gray">○</span>
+      ${userId} <em>(미연결)</em>
+      <button class="btn-test" data-userid="${userId}">테스트</button>`;
+  }
+  if (testerTarget === userId) {
+    li.querySelector('.btn-test').classList.add('active');
+  }
+}
+
 function renderUsers(users) {
   // 드롭다운 갱신 (이미 연결된 ID는 비활성화)
   const prev = userSelect.value;
   userSelect.innerHTML = '';
   for (const u of users) {
     const opt = document.createElement('option');
-    opt.value    = u.id;
+    opt.value       = u.id;
     opt.textContent = u.id;
-    opt.disabled = u.connected && u.id !== registeredAs;
+    opt.disabled    = u.connected && u.id !== registeredAs;
     userSelect.appendChild(opt);
   }
   if (prev) userSelect.value = prev;
@@ -49,44 +82,27 @@ function renderUsers(users) {
   userList.innerHTML = '';
   for (const u of users) {
     const li = document.createElement('li');
-    li.className = u.connected ? 'connected' : 'disconnected';
-    li.innerHTML = u.connected
-      ? `<span class="dot green">●</span> <strong>${u.id}</strong> &nbsp;
-         <a href="${serverBase()}/${encodeURIComponent(u.id)}/" target="_blank">
-           ${serverBase()}/${u.id}/
-         </a>`
-      : `<span class="dot gray">○</span> ${u.id} <em>(미연결)</em>`;
+    li.dataset.userid = u.id;
+    renderUserLi(li, u.id, u.connected);
     userList.appendChild(li);
   }
 }
 
 // ── 상태 업데이트 브로드캐스트 처리 ──────────────────────
 function applyStatusUpdate({ userId, connected }) {
-  // 드롭다운의 해당 option만 토글
+  // 드롭다운 option 토글
   for (const opt of userSelect.options) {
     if (opt.value === userId) {
       opt.disabled = connected && userId !== registeredAs;
     }
   }
-  // 목록의 해당 항목 업데이트
-  for (const li of userList.children) {
-    const name = li.querySelector('strong')?.textContent || li.textContent?.split('(')[0]?.replace(/[●○\s]/g, '').trim();
-    if (name === userId) {
-      if (connected) {
-        li.className = 'connected';
-        li.innerHTML = `<span class="dot green">●</span> <strong>${userId}</strong> &nbsp;
-          <a href="${serverBase()}/${encodeURIComponent(userId)}/" target="_blank">
-            ${serverBase()}/${userId}/
-          </a>`;
-      } else {
-        li.className = 'disconnected';
-        li.innerHTML = `<span class="dot gray">○</span> ${userId} <em>(미연결)</em>`;
-      }
-      return;
-    }
+  // 목록 항목 업데이트
+  const li = userList.querySelector(`li[data-userid="${userId}"]`);
+  if (li) {
+    renderUserLi(li, userId, connected);
+  } else {
+    loadUsers();
   }
-  // 목록에 없으면 다시 로드
-  loadUsers();
 }
 
 // ── 에이전트: localhost:3000 포워딩 (재시도 포함) ─────────
@@ -112,7 +128,7 @@ async function handleRequest({ requestId, method, path, headers, body }) {
 
     const responseBody = await response.text();
 
-    if (!socket?.connected) return; // fetch 중 소켓 해제됨
+    if (!socket?.connected) return;
     socket.emit('response', {
       requestId,
       status: response.status,
@@ -132,8 +148,8 @@ async function handleRequest({ requestId, method, path, headers, body }) {
 
 // ── 소켓 연결 & 등록 ─────────────────────────────────────
 function connect(userId) {
-  connectBtn.disabled = true;
-  connectBtn.textContent = '연결 중...';
+  connectBtn.disabled     = true;
+  connectBtn.textContent  = '연결 중...';
 
   socket = io({ autoConnect: false });
 
@@ -142,24 +158,25 @@ function connect(userId) {
   });
 
   socket.on('registered', ({ userId: uid }) => {
-    registeredAs = uid;
-    connectBtn.disabled  = false;
+    registeredAs           = uid;
+    connectBtn.disabled    = false;
     connectBtn.textContent = 'Disconnect';
     connectBtn.classList.add('active');
-    userSelect.disabled  = true;
-    showError('');
+    connectCard.classList.add('connected');
+    userSelect.disabled    = true;
     errorMsg.style.display = 'none';
   });
 
   socket.on('register-error', ({ message }) => {
     showError(message);
     socket.disconnect();
-    socket = null;
+    socket       = null;
     registeredAs = null;
-    connectBtn.disabled  = false;
+    connectBtn.disabled    = false;
     connectBtn.textContent = 'Connect';
     connectBtn.classList.remove('active');
-    userSelect.disabled  = false;
+    connectCard.classList.remove('connected');
+    userSelect.disabled    = false;
   });
 
   socket.on('request', handleRequest);
@@ -171,6 +188,7 @@ function connect(userId) {
       registeredAs = null;
       connectBtn.textContent = 'Connect';
       connectBtn.classList.remove('active');
+      connectCard.classList.remove('connected');
       userSelect.disabled = false;
       loadUsers();
     }
@@ -181,9 +199,7 @@ function connect(userId) {
 }
 
 function disconnect() {
-  if (socket) {
-    socket.disconnect();
-  }
+  if (socket) socket.disconnect();
 }
 
 // ── 버튼 이벤트 ──────────────────────────────────────────
@@ -197,5 +213,117 @@ connectBtn.addEventListener('click', () => {
   }
 });
 
+// ── API 테스터 ────────────────────────────────────────────
+function openTester(userId) {
+  // 이전 선택 버튼 해제, 새 버튼 활성화
+  userList.querySelectorAll('.btn-test').forEach(b => b.classList.remove('active'));
+  const btn = userList.querySelector(`.btn-test[data-userid="${userId}"]`);
+  if (btn) btn.classList.add('active');
+
+  testerTarget           = userId;
+  testerTargetName.textContent = userId;
+  rightPanel.style.display     = '';
+
+  // 폼 초기화
+  testerMethod.value        = 'GET';
+  testerPath.value          = '';
+  headerRows.innerHTML      = '';
+  testerBody.value          = '';
+  testerResponse.style.display = 'none';
+  updateBodyVisibility();
+}
+
+function closeTester() {
+  userList.querySelectorAll('.btn-test').forEach(b => b.classList.remove('active'));
+  testerTarget             = null;
+  rightPanel.style.display = 'none';
+}
+
+function addHeaderRow() {
+  const row = document.createElement('div');
+  row.className = 'header-row';
+
+  const keyInput = document.createElement('input');
+  keyInput.type        = 'text';
+  keyInput.placeholder = 'Header name';
+
+  const valInput = document.createElement('input');
+  valInput.type        = 'text';
+  valInput.placeholder = 'Value';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className   = 'btn-remove-header';
+  removeBtn.textContent = '✕';
+  removeBtn.onclick     = () => row.remove();
+
+  row.append(keyInput, valInput, removeBtn);
+  headerRows.appendChild(row);
+}
+
+function updateBodyVisibility() {
+  const hasBody = ['POST', 'PUT', 'PATCH'].includes(testerMethod.value);
+  bodySection.style.display = hasBody ? '' : 'none';
+}
+
+async function sendTesterRequest() {
+  if (!testerTarget) return;
+
+  const method  = testerMethod.value;
+  const path    = testerPath.value || '/';
+
+  const headers = {};
+  for (const row of headerRows.children) {
+    const inputs = row.querySelectorAll('input');
+    const key    = inputs[0].value.trim();
+    const val    = inputs[1].value.trim();
+    if (key) headers[key] = val;
+  }
+
+  const body = ['POST', 'PUT', 'PATCH'].includes(method) && testerBody.value
+    ? testerBody.value
+    : undefined;
+
+  testerSend.disabled      = true;
+  testerSend.textContent   = '전송 중...';
+  testerResponse.style.display = 'none';
+
+  try {
+    const url = `${serverBase()}/${encodeURIComponent(testerTarget)}${path}`;
+    const res = await fetch(url, { method, headers, body });
+    const text = await res.text();
+
+    const cls = res.status < 300 ? 'ok' : res.status < 500 ? 'warn' : 'err';
+    testerStatusBadge.textContent = `${res.status} ${res.statusText}`;
+    testerStatusBadge.className   = `badge ${cls}`;
+
+    try {
+      testerResponseBody.textContent = JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      testerResponseBody.textContent = text || '(응답 없음)';
+    }
+  } catch (e) {
+    testerStatusBadge.textContent = 'Error';
+    testerStatusBadge.className   = 'badge err';
+    testerResponseBody.textContent = e.message;
+  } finally {
+    testerSend.disabled    = false;
+    testerSend.textContent = '보내기';
+    testerResponse.style.display = '';
+  }
+}
+
+// 테스트 버튼 이벤트 (이벤트 위임)
+userList.addEventListener('click', (e) => {
+  if (e.target.classList.contains('btn-test')) {
+    openTester(e.target.dataset.userid);
+  }
+});
+
+document.getElementById('tester-close-btn').addEventListener('click', closeTester);
+document.getElementById('add-header-btn').addEventListener('click', addHeaderRow);
+testerMethod.addEventListener('change', updateBodyVisibility);
+testerSend.addEventListener('click', sendTesterRequest);
+
 // ── 초기 로드 ─────────────────────────────────────────────
+updateBodyVisibility();
 loadUsers();
