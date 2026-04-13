@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ALLOWED_IDS } from './userIds';
 import { pendingStore } from './pendingStore';
 import { logStore } from './logStore';
+import { ADMIN_PASSWORD } from './index';
 
 const connectedSockets = new Map<string, Socket>();
 
@@ -21,7 +22,12 @@ export function setupWsHandler(io: Server): void {
   io.on('connection', (socket: Socket) => {
     let registeredUserId: string | null = null;
 
-    socket.on('join-admin', () => {
+    socket.on('join-admin', (password: string) => {
+      if (password !== ADMIN_PASSWORD) {
+        log('AUTH', '관리자 권한 시도 실패');
+        socket.emit('auth-error', { message: '비밀번호가 틀렸습니다.' });
+        return;
+      }
       void socket.join('admin');
       socket.emit('log-history', logStore.getAll());
     });

@@ -6,7 +6,8 @@ import { Server } from 'socket.io';
 import { setupRouter } from './httpRouter';
 import { setupWsHandler } from './wsHandler';
 
-const PORT = 2999;
+const PORT = process.env.PORT || 2999;
+export const ADMIN_PASSWORD = process.env.PASSWORD || 'password';
 
 const app = express();
 const server = http.createServer(app);
@@ -21,7 +22,24 @@ app.use(cors());
 app.use(express.text({ type: '*/*', limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-app.get('/admin', (_req, res) => {
+app.get('/admin', (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin Area"');
+    return res.status(401).send('Authentication required');
+  }
+
+  const base64 = auth.split(' ')[1];
+  if (!base64) return res.status(401).send('Invalid Auth');
+  
+  const decoded = Buffer.from(base64, 'base64').toString();
+  const [, pass] = decoded.split(':');
+
+  if (pass !== ADMIN_PASSWORD) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin Area"');
+    return res.status(401).send('Invalid password');
+  }
+
   res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
 });
 

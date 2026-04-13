@@ -290,8 +290,20 @@
     socket.on('connect', () => {
       statusDot.classList.add('connected');
       statusText.textContent = '서버 연결됨';
-      socket.emit('join-admin');
+      
+      let pass = localStorage.getItem('admin_pass');
+      if (!pass) {
+        pass = prompt('관리자 비밀번호를 입력하세요:');
+        if (pass) localStorage.setItem('admin_pass', pass);
+      }
+      socket.emit('join-admin', pass);
       loadStudents();
+    });
+
+    socket.on('auth-error', ({ message }) => {
+      alert(message);
+      localStorage.removeItem('admin_pass');
+      location.reload();
     });
 
     socket.on('status-update', ({ userId, connected }) => {
